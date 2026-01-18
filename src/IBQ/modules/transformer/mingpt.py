@@ -207,7 +207,7 @@ class GPT(nn.Module):
         # self.tok_emb.weight.required_grad = False
 
         # version 2:
-        self.tok_emb.weight.data = torch.load(ckpt_path, map_location="cpu")["state_dict"]["quantize.embedding.weight"]
+        self.tok_emb.weight.data = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]["quantize.embedding.weight"]
         self.tok_emb.weight.data = self.tok_emb.weight.data.float()
         self.tok_emb.weight.required_grad = False
         print(f"Transformer Embedding initialized from {ckpt_path}")

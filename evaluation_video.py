@@ -38,7 +38,7 @@ _UINT8_MAX_F = float(torch.iinfo(torch.uint8).max)
 def load_vqgan_new(config, ckpt_path=None):
     model = VQModel(**config.model.init_args)
     if ckpt_path is not None:
-        sd = torch.load(ckpt_path, map_location="cpu")["state_dict"]
+        sd = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
         missing, unexpected = model.load_state_dict(sd, strict=False)
     return model.eval()
 
@@ -96,7 +96,7 @@ def main():
     # FID score related
     i3d = InceptionI3d(400, in_channels=3)
     i3d_path = "../../pretrained/i3d/i3d_pretrained_400.pt" #specify your own I3D Path
-    i3d.load_state_dict(torch.load(i3d_path, map_location="cpu"), strict=True)
+    i3d.load_state_dict(torch.load(i3d_path, map_location="cpu", weights_only=False), strict=True)
     i3d.eval()
     i3d = i3d.to(DEVICE)
 

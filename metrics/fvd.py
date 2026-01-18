@@ -35,7 +35,7 @@ def load_fvd_model(device):
     i3d = InceptionI3d(400, in_channels=3).to(device)
     current_dir = os.path.dirname(os.path.abspath(__file__))
     i3d_path = os.path.join(current_dir, 'i3d_pretrained_400.pt')
-    i3d.load_state_dict(torch.load(i3d_path, map_location=device))
+    i3d.load_state_dict(torch.load(i3d_path, map_location=device, weights_only=False))
     i3d.eval()
     return i3d
 

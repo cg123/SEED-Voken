@@ -225,7 +225,7 @@ def load_model_from_config(config, sd, gpu=True, eval_mode=True):
 def load_model(config, ckpt, gpu, eval_mode):
     # load the specified checkpoint
     if ckpt:
-        pl_sd = torch.load(ckpt, map_location="cpu")
+        pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
         global_step = pl_sd.get("global_step", None)
         if global_step:
             print(f"loaded model from global step {global_step}.")

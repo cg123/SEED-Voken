@@ -52,7 +52,7 @@ def load_config(config_path, display=False):
 def load_vqgan_new(config, model_type, ckpt_path=None, is_gumbel=False):
     model = MODEL_TYPE[model_type](**config.model.init_args) 
     if ckpt_path is not None:
-        sd = torch.load(ckpt_path, map_location="cpu")["state_dict"]
+        sd = torch.load(ckpt_path, map_location="cpu", weights_only=False)["state_dict"]
         missing, unexpected = model.load_state_dict(sd, strict=False)
     return model.eval()
 

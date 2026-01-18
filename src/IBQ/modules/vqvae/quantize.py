@@ -444,7 +444,7 @@ class IndexPropagationQuantize(nn.Module):
 
         dim = 1
         ind = soft_one_hot.max(dim, keepdim=True)[1]
-        hard_one_hot = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, ind, 1.0)
+        hard_one_hot = torch.zeros_like(logits, memory_format=torch.contiguous_format).scatter_(dim, ind, 1.0)
         one_hot = hard_one_hot - soft_one_hot.detach() + soft_one_hot
 
         z_q = einsum('b n h w, n d -> b d h w', one_hot, self.embedding.weight)

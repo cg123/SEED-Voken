@@ -108,7 +108,7 @@ class VQModel(L.LightningModule):
         use last temporal inflation as MAGVIT2 does
         """
         assert image_pretrain_path is not None
-        image_pretrain_sd = torch.load(image_pretrain_path, map_location="cpu")["state_dict"]
+        image_pretrain_sd = torch.load(image_pretrain_path, map_location="cpu", weights_only=False)["state_dict"]
         new_video_encoder_params = self.encoder.state_dict()
         new_video_decoder_params = self.decoder.state_dict()
         original_image_encoder_params = OrderedDict()
@@ -211,7 +211,7 @@ class VQModel(L.LightningModule):
         return {k: v for k, v in super().state_dict(*args, destination, prefix, keep_vars).items() if ("inception_model" not in k and "lpips_vgg" not in k and "lpips_alex" not in k)}
         
     def init_from_ckpt(self, path, ignore_keys=list(), stage="transformer"):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         ema_mapping = {}
         new_params = OrderedDict()
         if stage == "transformer": ### directly use ema encoder and decoder parameter

@@ -98,7 +98,7 @@ class VQModel(L.LightningModule):
         return {k: v for k, v in super().state_dict(*args, destination, prefix, keep_vars).items() if ("inception_model" not in k and "lpips_vgg" not in k and "lpips_alex" not in k)}
         
     def init_from_ckpt(self, path, ignore_keys=list(), stage="transformer"):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         ema_mapping = {}
         new_params = OrderedDict()
         if stage == "transformer": ### directly use ema encoder and decoder parameter
