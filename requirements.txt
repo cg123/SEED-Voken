@@ -9,6 +9,7 @@ omegaconf
 einops>=0.7.0
 requests
 transformers>=4.47.0
+datasets>=2.14.0
 lpips
 av
 decord
