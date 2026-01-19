@@ -10,8 +10,10 @@ from torch.utils.data.dataloader import default_collate as custom_collate
 
 import torch
 torch.set_float32_matmul_precision("high")
-torch.backends.cudnn.deterministic = True #True
-torch.backends.cudnn.benchmark = False #False
+
+# Performance settings - set deterministic=True only if reproducibility is critical
+torch.backends.cudnn.deterministic = False
+torch.backends.cudnn.benchmark = True
 
 def get_obj_from_str(string, reload=False):
     module, cls = string.rsplit(".", 1)
@@ -41,11 +43,13 @@ class WrappedDataset(Dataset):
 
 class DataModuleFromConfig(L.LightningDataModule):
     def __init__(self, batch_size, train=None, validation=None, test=None,
-                 wrap=False, num_workers=None):
+                 wrap=False, num_workers=None, persistent_workers=True, prefetch_factor=2):
         super().__init__()
         self.batch_size = batch_size
         self.dataset_configs = dict()
         self.num_workers = num_workers if num_workers is not None else batch_size*2
+        self.persistent_workers = persistent_workers and self.num_workers > 0
+        self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
         if train is not None:
             self.dataset_configs["train"] = train
             self.train_dataloader = self._train_dataloader
@@ -77,19 +81,31 @@ class DataModuleFromConfig(L.LightningDataModule):
         laion serves as the train loader
         """
         if "pretrain" in self.dataset_configs["train"]["target"]: ## webdataset no need for shuffle=True
-            return DataLoader(self.datasets["train"], batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=True)
+            return DataLoader(self.datasets["train"], batch_size=self.batch_size,
+                              num_workers=self.num_workers, pin_memory=True,
+                              persistent_workers=self.persistent_workers,
+                              prefetch_factor=self.prefetch_factor)
         else:
             return DataLoader(self.datasets["train"], batch_size=self.batch_size,
-                          num_workers=self.num_workers, shuffle=True, collate_fn=custom_collate, pin_memory=True)
+                              num_workers=self.num_workers, shuffle=True, collate_fn=custom_collate,
+                              pin_memory=True, drop_last=True,
+                              persistent_workers=self.persistent_workers,
+                              prefetch_factor=self.prefetch_factor)
 
     def _val_dataloader(self):
         return DataLoader(self.datasets["validation"],
                           batch_size=self.batch_size,
-                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False, pin_memory=True)
+                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
+                          pin_memory=True,
+                          persistent_workers=self.persistent_workers,
+                          prefetch_factor=self.prefetch_factor)
 
     def _test_dataloader(self):
         return DataLoader(self.datasets["test"], batch_size=self.batch_size,
-                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False, pin_memory=True)
+                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
+                          pin_memory=True,
+                          persistent_workers=self.persistent_workers,
+                          prefetch_factor=self.prefetch_factor)
 
 def main():
     cli = LightningCLI(

@@ -39,11 +39,17 @@ class VQModel(L.LightningModule):
                 lr_drop_rate = 0.1,
                 use_ema = False,
                 stage = None,
+                compile_model = False,  # Enable torch.compile() for faster training
                  ):
         super().__init__()
         self.image_key = image_key
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
+
+        # Apply torch.compile() for performance optimization
+        if compile_model:
+            self.encoder = torch.compile(self.encoder)
+            self.decoder = torch.compile(self.decoder)
         self.loss = instantiate_from_config(lossconfig)
         self.quantize = VectorQuantizer(n_embed, embed_dim, beta=0.25,
                                         remap=remap, sane_index_shape=sane_index_shape, l2_normalize=l2_normalize)
@@ -367,6 +373,7 @@ class IBQ(VQModel):
                 resume_lr = None,
                 use_ema = False,
                 stage = None,
+                compile_model = False,
                  ):
         z_channels = ddconfig["z_channels"]
         super().__init__(ddconfig,
@@ -390,7 +397,8 @@ class IBQ(VQModel):
                         use_ema = use_ema,
                         stage = stage,
                         lr_drop_epoch = lr_drop_epoch,
-                        lr_drop_rate = lr_drop_rate
+                        lr_drop_rate = lr_drop_rate,
+                        compile_model = compile_model,
                         )
         self.quantize = IndexPropagationQuantize(n_embed, embed_dim, beta, use_entropy_loss,
                                           remap=remap, cosine_similarity=cosine_similarity,
