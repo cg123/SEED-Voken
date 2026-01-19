@@ -227,10 +227,17 @@ class VQModel(L.LightningModule):
         if not hasattr(self, '_nan_counters'):
             self._nan_counters = {}
 
-        if torch.isnan(loss) or torch.isinf(loss):
+        is_bad = torch.isnan(loss) | torch.isinf(loss)
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            bad_int = is_bad.detach().to(dtype=torch.int, device=loss.device)
+            torch.distributed.all_reduce(bad_int, op=torch.distributed.ReduceOp.MAX)
+            is_bad = bad_int.bool()
+
+        if is_bad:
             self._nan_counters[name] = self._nan_counters.get(name, 0) + 1
             self.log(f"train/{name}_nan_count", float(self._nan_counters[name]), prog_bar=True)
-            print(f"WARNING: {name} is NaN/Inf at step {self.global_step} (count: {self._nan_counters[name]})")
+            if self.trainer.is_global_zero:
+                print(f"WARNING: {name} is NaN/Inf at step {self.global_step} (count: {self._nan_counters[name]})")
 
             # If too many NaNs in a row for this specific loss, something is very wrong
             if self._nan_counters[name] >= 10:
