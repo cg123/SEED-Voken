@@ -53,10 +53,12 @@ class VQModel(L.LightningModule):
         self.post_quant_conv = torch.nn.Conv2d(embed_dim, ddconfig["z_channels"], 1)
 
         # Apply torch.compile() for performance optimization
+        # Note: quantize is not compiled when use_ema=True due to EMA parameter name tracking
         if compile_model:
             self.encoder = torch.compile(self.encoder)
             self.decoder = torch.compile(self.decoder)
-            self.quantize = torch.compile(self.quantize)
+            if not use_ema:
+                self.quantize = torch.compile(self.quantize)
             if hasattr(self.loss, 'discriminator'):
                 self.loss.discriminator = torch.compile(self.loss.discriminator)
         self.stage = stage
