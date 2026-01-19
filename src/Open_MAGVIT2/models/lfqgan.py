@@ -36,17 +36,26 @@ class VQModel(L.LightningModule):
                 stage = None,
                 lr_drop_epoch = None,
                 lr_drop_rate = 0.1,
-                factorized_bits = [9, 9]
+                factorized_bits = [9, 9],
+                compile_model = False,  # Enable torch.compile() for faster training
                 ):
         super().__init__()
         self.image_key = image_key
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
         self.loss = instantiate_from_config(lossconfig)
-        self.quantize = LFQ(dim=embed_dim, codebook_size=n_embed, 
-                            sample_minimization_weight=sample_minimization_weight, 
-                            batch_maximization_weight=batch_maximization_weight, 
+        self.quantize = LFQ(dim=embed_dim, codebook_size=n_embed,
+                            sample_minimization_weight=sample_minimization_weight,
+                            batch_maximization_weight=batch_maximization_weight,
                             token_factorization=token_factorization, factorized_bits=factorized_bits)
+
+        # Apply torch.compile() for performance optimization
+        if compile_model:
+            self.encoder = torch.compile(self.encoder)
+            self.decoder = torch.compile(self.decoder)
+            self.quantize = torch.compile(self.quantize)
+            if hasattr(self.loss, 'discriminator'):
+                self.loss.discriminator = torch.compile(self.loss.discriminator)
 
         if colorize_nlabels is not None:
             assert type(colorize_nlabels)==int
