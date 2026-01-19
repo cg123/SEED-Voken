@@ -222,6 +222,24 @@ class VQModel(L.LightningModule):
                     opt_gen_param_group["lr"] = opt_gen_param_group["lr"] * self.lr_drop_rate
                     opt_disc_param_group["lr"] = opt_disc_param_group["lr"] * self.lr_drop_rate
     
+    def _check_nan(self, loss, name):
+        """Check if loss is NaN or Inf and handle gracefully."""
+        if not hasattr(self, '_nan_counters'):
+            self._nan_counters = {}
+
+        if torch.isnan(loss) or torch.isinf(loss):
+            self._nan_counters[name] = self._nan_counters.get(name, 0) + 1
+            self.log(f"train/{name}_nan_count", float(self._nan_counters[name]), prog_bar=True)
+            print(f"WARNING: {name} is NaN/Inf at step {self.global_step} (count: {self._nan_counters[name]})")
+
+            # If too many NaNs in a row for this specific loss, something is very wrong
+            if self._nan_counters[name] >= 10:
+                raise RuntimeError(f"Too many consecutive NaN losses for {name} ({self._nan_counters[name]}). Training stopped.")
+            return True
+        else:
+            self._nan_counters[name] = 0  # Reset counter for this specific loss
+            return False
+
     # fix mulitple optimizer bug
     # refer to https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
     def training_step(self, batch, batch_idx):
@@ -242,24 +260,28 @@ class VQModel(L.LightningModule):
         # optimize discriminator
         discloss, log_dict_disc = self.loss(qloss, x, xrec, 1, self.global_step,
                                             last_layer=self.get_last_layer(), split="train")
-        opt_disc.zero_grad()
-        self.manual_backward(discloss)
-        opt_disc.step()
-        self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=True)
 
+        # Skip discriminator update if loss is NaN
+        if not self._check_nan(discloss, "disc_loss"):
+            opt_disc.zero_grad()
+            self.manual_backward(discloss)
+            opt_disc.step()
+            self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=True)
 
         # optimize generator
         aeloss, log_dict_ae = self.loss(qloss, x, xrec, 0, self.global_step,
                                         last_layer=self.get_last_layer(), split="train")
-        opt_gen.zero_grad()
-        self.manual_backward(aeloss)
 
+        # Skip generator update if loss is NaN
+        if not self._check_nan(aeloss, "ae_loss"):
+            opt_gen.zero_grad()
+            self.manual_backward(aeloss)
 
-        if self.gradient_clip_val > 0: # for cosine similarity
-            self.clip_gradients(opt_gen, gradient_clip_val=self.gradient_clip_val, gradient_clip_algorithm="norm")
+            if self.gradient_clip_val > 0: # for cosine similarity
+                self.clip_gradients(opt_gen, gradient_clip_val=self.gradient_clip_val, gradient_clip_algorithm="norm")
 
-        opt_gen.step()
-        self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=True)
+            opt_gen.step()
+            self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=True)
 
         if self.scheduler_type != "None":
             scheduler_disc.step()
