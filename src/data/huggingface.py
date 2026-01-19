@@ -57,8 +57,9 @@ class HuggingFaceImageDataset(Dataset):
 
     Args:
         config: Configuration dictionary with the following keys:
-            - dataset_name (str): HuggingFace dataset name (required)
+            - dataset_name (str): HuggingFace dataset name or "parquet" for local/S3 parquet files
             - dataset_config (str, optional): Dataset configuration name
+            - data_files (dict/str, optional): Parquet file paths (e.g., {"train": "s3://bucket/*.parquet"})
             - split (str): Dataset split (default: "train")
             - image_column (str, optional): Column name for images (auto-detected if not specified)
             - label_column (str, optional): Column name for labels (auto-detected if not specified)
@@ -89,6 +90,7 @@ class HuggingFaceImageDataset(Dataset):
 
         # Optional parameters
         self.dataset_config = self.config.get("dataset_config")
+        self.data_files = self.config.get("data_files")
         self.split = self.config.get("split", "train")
         self.image_column = self.config.get("image_column")
         self.label_column = self.config.get("label_column")
@@ -107,6 +109,8 @@ class HuggingFaceImageDataset(Dataset):
         }
         if self.dataset_config:
             load_kwargs["name"] = self.dataset_config
+        if self.data_files:
+            load_kwargs["data_files"] = self.data_files
         if self.token:
             load_kwargs["token"] = self.token
         if self.cache_dir:
@@ -191,6 +195,7 @@ class HuggingFaceStreamingDataset(IterableDataset):
 
         # Optional parameters
         self.dataset_config = self.config.get("dataset_config")
+        self.data_files = self.config.get("data_files")
         self.split = self.config.get("split", "train")
         self.image_column = self.config.get("image_column")
         self.label_column = self.config.get("label_column")
@@ -210,6 +215,8 @@ class HuggingFaceStreamingDataset(IterableDataset):
         }
         if self.dataset_config:
             load_kwargs["name"] = self.dataset_config
+        if self.data_files:
+            load_kwargs["data_files"] = self.data_files
         if self.token:
             load_kwargs["token"] = self.token
         if self.cache_dir:

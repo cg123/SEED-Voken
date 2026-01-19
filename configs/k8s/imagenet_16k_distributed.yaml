@@ -7,7 +7,9 @@ trainer:
   precision: 16-mixed
   max_epochs: 330
   check_val_every_n_epoch: 1
+  val_check_interval: 0.2
   num_sanity_val_steps: 2
+  log_every_n_steps: 10
   logger:
     - class_path: lightning.pytorch.loggers.WandbLogger
       init_args:
@@ -22,11 +24,19 @@ trainer:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         # S3 path for checkpoints - accessible from all nodes
-        dirpath: "s3://torchtitan-us-west-2-ablations/seed-voken/ibq-16k/checkpoints/"
+        dirpath: "s3://arcee-seed-voken-checkpoints/ibq-16k/checkpoints/"
         save_top_k: 3
         save_last: true
         monitor: "train/perceptual_loss"
         every_n_epochs: 1
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        # S3 path for checkpoints - accessible from all nodes
+        dirpath: "s3://arcee-seed-voken-checkpoints/ibq-16k/checkpoints/"
+        save_top_k: 3
+        save_last: true
+        monitor: "train/perceptual_loss"
+        every_n_train_steps: 1000
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step

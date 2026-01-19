@@ -18,14 +18,6 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install additional dependencies for distributed training and S3
-RUN pip install --no-cache-dir \
-    wandb \
-    boto3 \
-    s3fs \
-    fsspec[s3] \
-    lightning[pytorch-extra]
-
 # Copy the rest of the code
 COPY . .
 

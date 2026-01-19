@@ -1,15 +1,21 @@
-torch==2.9.1 --index-url https://download.pytorch.org/whl/cu124
-torchvision --index-url https://download.pytorch.org/whl/cu124
-lightning>=2.5.0
+torch==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu128
+lightning~=2.6.0
 jsonargparse[signatures]>=4.27.7
 tensorboard
 tensorboardx
-albumentations>=1.4.4
+albumentations~=2.0.8
 omegaconf
-einops>=0.7.0
+einops~=0.8.1
 requests
 transformers>=4.47.0
 datasets>=2.14.0
 lpips
 av
 decord
+scikit-image
+wandb
+lightning[pytorch-extra]
+boto3~=1.42.30
+s3fs~=2026.1.0
+fsspec[s3]~=2026.1.0
