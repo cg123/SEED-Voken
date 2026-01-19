@@ -66,6 +66,7 @@ class DataModuleFromConfig(L.LightningDataModule):
             instantiate_from_config(data_cfg)
 
     def setup(self, stage=None):
+        from torch.utils.data import IterableDataset
         self.datasets = dict()
         for k in self.dataset_configs:
             if "pretrain" not in self.dataset_configs[k]["target"]: ##laion should use webdataset
@@ -76,11 +77,17 @@ class DataModuleFromConfig(L.LightningDataModule):
             for k in self.datasets:
                 self.datasets[k] = WrappedDataset(self.datasets[k])
 
+        # Track which datasets are iterable
+        self.is_iterable = {k: isinstance(ds, IterableDataset) for k, ds in self.datasets.items()}
+
     def _train_dataloader(self):
         """
         laion serves as the train loader
         """
-        if "pretrain" in self.dataset_configs["train"]["target"]: ## webdataset no need for shuffle=True
+        # IterableDatasets (webdataset, streaming HF datasets) don't support shuffle
+        is_iterable = self.is_iterable.get("train", False)
+
+        if is_iterable:
             return DataLoader(self.datasets["train"], batch_size=self.batch_size,
                               num_workers=self.num_workers, pin_memory=True,
                               persistent_workers=self.persistent_workers,
