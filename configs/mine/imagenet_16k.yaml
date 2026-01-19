@@ -4,7 +4,7 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   devices: 8
   num_nodes: 1
-  precision: 16-mixed
+  precision: bf16-mixed
   max_epochs: 330
   check_val_every_n_epoch: 1
   num_sanity_val_steps: -1
@@ -95,4 +95,3 @@ data:
           data_folder: "/workspace/imagenet/ILSVRC/Data/CLS-LOC"
           split_method: "subfolder"
           size: 256
-

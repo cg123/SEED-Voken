@@ -1,0 +1,86 @@
+apiVersion: "kubeflow.org/v1"
+kind: PyTorchJob
+metadata:
+  name: seed-voken-ibq-16k
+spec:
+  elasticPolicy:
+    rdzvBackend: etcd
+    rdzvHost: etcd
+    rdzvPort: 2379
+    minReplicas: 4
+    maxReplicas: 4
+    maxRestarts: 1
+  pytorchReplicaSpecs:
+    Worker:
+      replicas: 4
+      restartPolicy: Never
+      template:
+        metadata:
+          labels:
+            app: seed-voken
+        spec:
+          # Use the same service account that has S3 access
+          serviceAccountName: torchtitan-service-account
+          volumes:
+            - name: shm
+              emptyDir:
+                medium: Memory
+            - name: local
+              hostPath:
+                path: /mnt/k8s-disks/0
+          containers:
+            - name: pytorch
+              # UPDATE THIS with your ECR image after building
+              image: 818273938349.dkr.ecr.us-east-2.amazonaws.com/seed-voken:latest
+              imagePullPolicy: Always
+              resources:
+                limits:
+                  nvidia.com/gpu: 8
+                  vpc.amazonaws.com/efa: 32
+              env:
+                # NCCL settings for EFA
+                - name: NCCL_IB_DISABLE
+                  value: "1"
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: LOGLEVEL
+                  value: "INFO"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eth0,en,eth,em,bond"
+                - name: PYTHONFAULTHANDLER
+                  value: "1"
+                # API keys from secrets
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-keys
+                      key: hf
+                - name: WANDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: api-keys
+                      key: wandb
+                # AWS region for S3 access
+                - name: AWS_DEFAULT_REGION
+                  value: "us-west-2"
+              command: ["/bin/bash"]
+              args:
+                - "-c"
+                - |
+                  set -e
+                  echo "Starting SEED-Voken training on $(hostname)"
+                  echo "CUDA devices: $(nvidia-smi -L)"
+
+                  # Run training with Lightning CLI
+                  # Lightning automatically handles distributed setup via environment variables
+                  python main.py fit \
+                    --config=configs/k8s/imagenet_16k_distributed.yaml \
+                    || {
+                    echo "Training ended with error, sleeping for debugging..."
+                    sleep 600
+                  }
+              volumeMounts:
+                - name: shm
+                  mountPath: /dev/shm
+                - name: local
+                  mountPath: /local

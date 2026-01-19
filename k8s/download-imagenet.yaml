@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: imagenet-downloader
+  labels:
+    app: imagenet-downloader
+spec:
+  selector:
+    matchLabels:
+      app: imagenet-downloader
+  template:
+    metadata:
+      labels:
+        app: imagenet-downloader
+    spec:
+      # Run on all GPU nodes
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      volumes:
+        - name: local
+          hostPath:
+            path: /mnt/k8s-disks/0
+      containers:
+        - name: downloader
+          image: amazon/aws-cli:latest
+          env:
+            - name: AWS_DEFAULT_REGION
+              value: "us-west-2"
+            # Add your S3 bucket with ImageNet here
+            - name: IMAGENET_S3_PATH
+              value: "s3://your-bucket/imagenet/ILSVRC/"
+          command: ["/bin/bash"]
+          args:
+            - "-c"
+            - |
+              set -e
+              TARGET_DIR="/local/imagenet/ILSVRC"
+              MARKER_FILE="${TARGET_DIR}/.download_complete"
+
+              # Check if already downloaded
+              if [ -f "${MARKER_FILE}" ]; then
+                echo "ImageNet already downloaded, skipping..."
+                # Keep container running so DaemonSet doesn't restart
+                sleep infinity
+              fi
+
+              echo "Downloading ImageNet to ${TARGET_DIR}..."
+              mkdir -p ${TARGET_DIR}
+
+              # Sync from S3
+              aws s3 sync ${IMAGENET_S3_PATH} ${TARGET_DIR} --only-show-errors
+
+              # Mark as complete
+              touch ${MARKER_FILE}
+              echo "Download complete!"
+
+              # Keep running
+              sleep infinity
+          volumeMounts:
+            - name: local
+              mountPath: /local
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "4"
