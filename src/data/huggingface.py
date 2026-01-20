@@ -29,23 +29,39 @@ def _detect_column(columns: list, candidates: list, column_type: str) -> Optiona
     return None
 
 
-def _get_pil_image(item: Any) -> Image.Image:
-    """Extract PIL Image from various HuggingFace dataset formats."""
-    if isinstance(item, Image.Image):
-        return item
-    elif isinstance(item, dict):
-        # Some datasets wrap images in dicts with 'bytes' or 'path' keys
-        if "bytes" in item:
-            import io
-            return Image.open(io.BytesIO(item["bytes"]))
-        elif "path" in item:
-            return Image.open(item["path"])
-    elif isinstance(item, np.ndarray):
-        return Image.fromarray(item)
-    elif isinstance(item, str):
-        # Path to image
-        return Image.open(item)
-    raise ValueError(f"Cannot convert {type(item)} to PIL Image")
+def _get_pil_image(item: Any) -> Optional[Image.Image]:
+    """
+    Extract PIL Image from various HuggingFace dataset formats.
+
+    Returns None if the image cannot be loaded (corrupt, unsupported format, etc.)
+    """
+    import io
+    from PIL import ImageFile
+
+    # Allow loading of truncated images
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+    try:
+        if isinstance(item, Image.Image):
+            return item
+        elif isinstance(item, bytes):
+            # Raw bytes (common in Parquet files)
+            return Image.open(io.BytesIO(item))
+        elif isinstance(item, dict):
+            # Some datasets wrap images in dicts with 'bytes' or 'path' keys
+            if "bytes" in item:
+                return Image.open(io.BytesIO(item["bytes"]))
+            elif "path" in item:
+                return Image.open(item["path"])
+        elif isinstance(item, np.ndarray):
+            return Image.fromarray(item)
+        elif isinstance(item, str):
+            # Path to image
+            return Image.open(item)
+        return None
+    except Exception as e:
+        # Log but don't crash - allows skipping corrupt images
+        return None
 
 
 class HuggingFaceImageDataset(Dataset):
@@ -144,25 +160,48 @@ class HuggingFaceImageDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
-        item = self.dataset[idx]
+        # Try to load the image, skip to next if corrupt
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                # Use different index on retry to avoid infinite loop
+                actual_idx = (idx + attempt) % len(self.dataset)
+                item = self.dataset[actual_idx]
 
-        # Get image
-        raw_image = item[self.image_column]
-        pil_image = _get_pil_image(raw_image)
-        if pil_image.mode != "RGB":
-            pil_image = pil_image.convert("RGB")
+                # Get image
+                raw_image = item[self.image_column]
+                pil_image = _get_pil_image(raw_image)
 
-        # Apply transforms
-        image = self.transform(pil_image)
-        image = normalize_image(image)
+                # Skip if image couldn't be loaded
+                if pil_image is None:
+                    if attempt == max_retries - 1:
+                        raise ValueError(f"Failed to load valid image after {max_retries} attempts")
+                    continue
 
-        result = {"image": image}
+                if pil_image.mode != "RGB":
+                    pil_image = pil_image.convert("RGB")
 
-        # Add label if available
-        if self.label_column and self.label_column in item:
-            result["class_label"] = item[self.label_column]
+                # Apply transforms
+                image = self.transform(pil_image)
+                image = normalize_image(image)
 
-        return result
+                result = {"image": image}
+
+                # Add label if available
+                if self.label_column and self.label_column in item:
+                    result["class_label"] = item[self.label_column]
+
+                return result
+
+            except Exception as e:
+                # On last retry, give up and raise
+                if attempt == max_retries - 1:
+                    raise
+                # Otherwise try next sample
+                continue
+
+        # Should never reach here
+        raise RuntimeError(f"Failed to load image at index {idx}")
 
 
 class HuggingFaceStreamingDataset(IterableDataset):
@@ -246,21 +285,41 @@ class HuggingFaceStreamingDataset(IterableDataset):
         )
 
     def __iter__(self):
+        skipped_corrupt = 0
+        processed = 0
+
         for item in self.dataset:
-            # Get image
-            raw_image = item[self.image_column]
-            pil_image = _get_pil_image(raw_image)
-            if pil_image.mode != "RGB":
-                pil_image = pil_image.convert("RGB")
+            try:
+                # Get image
+                raw_image = item[self.image_column]
+                pil_image = _get_pil_image(raw_image)
 
-            # Apply transforms
-            image = self.transform(pil_image)
-            image = normalize_image(image)
+                # Skip if image couldn't be loaded
+                if pil_image is None:
+                    skipped_corrupt += 1
+                    if skipped_corrupt % 100 == 0:
+                        print(f"Warning: Skipped {skipped_corrupt} corrupt images so far")
+                    continue
 
-            result = {"image": image}
+                if pil_image.mode != "RGB":
+                    pil_image = pil_image.convert("RGB")
 
-            # Add label if available
-            if self.label_column and self.label_column in item:
-                result["class_label"] = item[self.label_column]
+                # Apply transforms
+                image = self.transform(pil_image)
+                image = normalize_image(image)
 
-            yield result
+                result = {"image": image}
+
+                # Add label if available
+                if self.label_column and self.label_column in item:
+                    result["class_label"] = item[self.label_column]
+
+                processed += 1
+                yield result
+
+            except Exception as e:
+                # Skip any sample that causes errors during processing
+                skipped_corrupt += 1
+                if skipped_corrupt % 100 == 0:
+                    print(f"Warning: Skipped {skipped_corrupt} samples due to errors (last error: {type(e).__name__})")
+                continue

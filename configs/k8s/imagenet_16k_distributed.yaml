@@ -39,7 +39,6 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
-    - class_path: main.StreamingDatasetTracker
 
 model:
   class_path: src.IBQ.models.ibqgan.IBQ
