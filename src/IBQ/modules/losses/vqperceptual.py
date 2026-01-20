@@ -139,6 +139,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
     def forward(self, codebook_loss, inputs, reconstructions, optimizer_idx,
                 global_step, last_layer=None, cond=None, split="train"):
         rec_loss = torch.abs(inputs.contiguous() - reconstructions.contiguous())
+        device = last_layer.device if last_layer is not None else inputs.device
         nll_loss = rec_loss.clone()
         if self.perceptual_weight > 0:
             p_loss = self.perceptual_loss(inputs.contiguous(), reconstructions.contiguous())
@@ -165,9 +166,9 @@ class VQLPIPSWithDiscriminator(nn.Module):
                     d_weight = self.calculate_adaptive_weight(nll_loss, g_loss, last_layer=last_layer)
                 except RuntimeError:
                     assert not self.training
-                    d_weight = torch.tensor(0.0)
+                    d_weight = torch.tensor(0.0, device=device)
             else:
-                d_weight = torch.tensor(self.gen_loss_weight)
+                d_weight = torch.tensor(self.gen_loss_weight, device=device)
 
             # pytorch lightning global_step bug when useing multple optimizers
             # disc_factor = adopt_weight(self.disc_factor, int(global_step / 2), threshold=self.discriminator_iter_start)
@@ -190,10 +191,10 @@ class VQLPIPSWithDiscriminator(nn.Module):
                            "{}/nll_loss".format(split): nll_loss.detach(),
                            "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                            "{}/perceptual_loss".format(split): p_loss.detach().mean(),
-                           "{}/d_weight".format(split): torch.tensor(0.0),
-                           "{}/disc_factor".format(split): torch.tensor(0.0),
-                           "{}/g_loss".format(split): torch.tensor(0.0),
-                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0),
+                           "{}/d_weight".format(split): torch.tensor(0.0, device=device),
+                           "{}/disc_factor".format(split): torch.tensor(0.0, device=device),
+                           "{}/g_loss".format(split): torch.tensor(0.0, device=device),
+                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0, device=device),
                            }
                 else:
                     if self.training:
@@ -203,7 +204,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                                "{}/perceptual_loss".format(split): p_loss.detach().mean(),
                                "{}/d_weight".format(split): d_weight.detach(),
-                               "{}/disc_factor".format(split): torch.tensor(disc_factor),
+                               "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): g_loss.detach(),
                                "{}/unsacled_g_loss".format(split): real_g_loss.detach(),
                                }
@@ -214,7 +215,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                                "{}/perceptual_loss".format(split): p_loss.detach().mean(),
                                "{}/d_weight".format(split): d_weight.detach(),
-                               "{}/disc_factor".format(split): torch.tensor(disc_factor),
+                               "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): real_g_loss.detach(),
                                }
             else:
@@ -228,10 +229,10 @@ class VQLPIPSWithDiscriminator(nn.Module):
                            "{}/nll_loss".format(split): nll_loss.detach(),
                            "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                            "{}/perceptual_loss".format(split): p_loss.detach().mean(),
-                           "{}/d_weight".format(split): torch.tensor(0.0),
-                           "{}/disc_factor".format(split): torch.tensor(0.0),
-                           "{}/g_loss".format(split): torch.tensor(0.0),
-                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0),
+                           "{}/d_weight".format(split): torch.tensor(0.0, device=device),
+                           "{}/disc_factor".format(split): torch.tensor(0.0, device=device),
+                           "{}/g_loss".format(split): torch.tensor(0.0, device=device),
+                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0, device=device),
                            }
                 else:
                     if self.training:
@@ -245,7 +246,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                                "{}/perceptual_loss".format(split): p_loss.detach().mean(),
                                "{}/d_weight".format(split): d_weight.detach(),
-                               "{}/disc_factor".format(split): torch.tensor(disc_factor),
+                               "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): g_loss.detach(),
                                "{}/unsacled_g_loss".format(split): real_g_loss.detach(),
                                }
@@ -260,7 +261,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/reconstruct_loss".format(split): rec_loss.detach().mean(),
                                "{}/perceptual_loss".format(split): p_loss.detach().mean(),
                                "{}/d_weight".format(split): d_weight.detach(),
-                               "{}/disc_factor".format(split): torch.tensor(disc_factor),
+                               "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): real_g_loss.detach(),
                                }
             return loss, log
@@ -287,17 +288,17 @@ class VQLPIPSWithDiscriminator(nn.Module):
                 d_loss = disc_factor * non_saturate_d_loss
 
             if disc_factor == 0:
-                log = {"{}/disc_loss".format(split): torch.tensor(0.0),
-                       "{}/logits_real".format(split): torch.tensor(0.0),
-                       "{}/logits_fake".format(split): torch.tensor(0.0),
-                       "{}/disc_factor".format(split): torch.tensor(disc_factor),
-                       "{}/lecam_loss".format(split): torch.tensor(0.0),
+                log = {"{}/disc_loss".format(split): torch.tensor(0.0, device=device),
+                       "{}/logits_real".format(split): torch.tensor(0.0, device=device),
+                       "{}/logits_fake".format(split): torch.tensor(0.0, device=device),
+                       "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
+                       "{}/lecam_loss".format(split): torch.tensor(0.0, device=device),
                        }
             else:
                 log = {"{}/disc_loss".format(split): d_loss.clone().detach().mean(),
                        "{}/logits_real".format(split): logits_real.detach().mean(),
                        "{}/logits_fake".format(split): logits_fake.detach().mean(),
-                       "{}/disc_factor".format(split): torch.tensor(disc_factor),
+                       "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                        "{}/lecam_loss".format(split): lecam_loss.detach(),
                        }
             return d_loss, log

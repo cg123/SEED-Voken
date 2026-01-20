@@ -4,10 +4,10 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   devices: 8
   num_nodes: 4
-  precision: 16-mixed
-  max_epochs: 330
+  precision: bf16-mixed
+  max_epochs: 30
   check_val_every_n_epoch: 1
-  val_check_interval: 0.2
+  val_check_interval: 0.05
   num_sanity_val_steps: 2
   log_every_n_steps: 10
   logger:
@@ -31,7 +31,6 @@ trainer:
         every_n_epochs: 1
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        # S3 path for checkpoints - accessible from all nodes
         dirpath: "s3://arcee-seed-voken-checkpoints/ibq-16k/checkpoints/"
         save_top_k: 3
         save_last: true
@@ -94,8 +93,11 @@ data:
       target: src.IBQ.data.huggingface.HuggingFaceStreamingDatasetTrain
       params:
         config:
-          dataset_name: gmongaras/CC12M_and_Imagenet21K_Recap_Highqual
+          dataset_name: "parquet"
           size: 256
+          image_column: "image"
+          data_files:
+            - "s3://arcee-seed-voken-checkpoints/data/**/*.parquet"
           shuffle: true
           shuffle_buffer_size: 10000
     validation:
