@@ -49,6 +49,9 @@ spec:
                   value: "eth0,en,eth,em,bond"
                 - name: PYTHONFAULTHANDLER
                   value: "1"
+                # Enable Gloo for CPU operations (metrics syncing)
+                - name: PL_TORCH_DISTRIBUTED_BACKEND
+                  value: "nccl"
                 # API keys from secrets
                 - name: HF_TOKEN
                   valueFrom:
@@ -71,9 +74,14 @@ spec:
                   echo "Starting SEED-Voken training on $(hostname)"
                   echo "CUDA devices: $(nvidia-smi -L)"
 
-                  # Run training with Lightning CLI
-                  # Lightning automatically handles distributed setup via environment variables
-                  python main.py fit \
+                  # Use torchrun for proper distributed initialization with etcd
+                  torchrun \
+                    --nproc_per_node=8 \
+                    --nnodes=4 \
+                    --rdzv_id=seed-voken-ibq-16k \
+                    --rdzv_backend=etcd \
+                    --rdzv_endpoint=etcd:2379 \
+                    main.py fit \
                     --config=configs/k8s/imagenet_16k_distributed.yaml \
                     || {
                     echo "Training ended with error, sleeping for debugging..."
