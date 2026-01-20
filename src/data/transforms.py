@@ -45,7 +45,9 @@ def create_image_transforms(
     elif backend == "torchvision":
         return _create_torchvision_transforms(size, random_crop, horizontal_flip)
     else:
-        raise ValueError(f"Unknown backend: {backend}. Must be 'albumentations' or 'torchvision'")
+        raise ValueError(
+            f"Unknown backend: {backend}. Must be 'albumentations' or 'torchvision'"
+        )
 
 
 def _create_albumentations_transforms(
@@ -59,7 +61,23 @@ def _create_albumentations_transforms(
     transforms = []
 
     # Resize so smallest side is target size
-    transforms.append(A.SmallestMaxSize(max_size=size))
+    transforms.append(
+        A.OneOf(
+            [
+                A.SmallestMaxSize(max_size=size, p=0.7),
+            ]
+            + [
+                A.RandomSizedCrop(
+                    (size, size * 3),
+                    size=(size, size),
+                    area_for_downscale="image",
+                    p=0.3,
+                ),
+            ]
+            if random_crop
+            else []
+        )
+    )
 
     # Crop
     if random_crop:

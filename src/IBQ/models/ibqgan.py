@@ -235,7 +235,14 @@ class VQModel(L.LightningModule):
 
         if is_bad:
             self._nan_counters[name] = self._nan_counters.get(name, 0) + 1
-            self.log(f"train/{name}_nan_count", float(self._nan_counters[name]), prog_bar=True)
+            self.log(
+                f"train/{name}_nan_count",
+                float(self._nan_counters[name]),
+                prog_bar=True,
+                on_step=True,
+                on_epoch=False,
+                sync_dist=True,
+            )
             if self.trainer.is_global_zero:
                 print(f"WARNING: {name} is NaN/Inf at step {self.global_step} (count: {self._nan_counters[name]})")
 
@@ -273,7 +280,14 @@ class VQModel(L.LightningModule):
             opt_disc.zero_grad()
             self.manual_backward(discloss)
             opt_disc.step()
-            self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=True)
+            self.log_dict(
+                log_dict_disc,
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=getattr(self.trainer, "world_size", 1) > 1,
+            )
 
         # optimize generator
         aeloss, log_dict_ae = self.loss(qloss, x, xrec, 0, self.global_step,
@@ -288,7 +302,14 @@ class VQModel(L.LightningModule):
                 self.clip_gradients(opt_gen, gradient_clip_val=self.gradient_clip_val, gradient_clip_algorithm="norm")
 
             opt_gen.step()
-            self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=True)
+            self.log_dict(
+                log_dict_ae,
+                prog_bar=False,
+                logger=True,
+                on_step=True,
+                on_epoch=True,
+                sync_dist=getattr(self.trainer, "world_size", 1) > 1,
+            )
 
         if self.scheduler_type != "None":
             scheduler_disc.step()
@@ -312,10 +333,24 @@ class VQModel(L.LightningModule):
 
         discloss, log_dict_disc = self.loss(qloss, x, x_rec, 1, self.global_step,
                                             last_layer=self.get_last_layer(), split="val")
-        self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=True)
-        self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=True)
+        self.log_dict(
+            log_dict_ae,
+            prog_bar=False,
+            logger=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
+        self.log_dict(
+            log_dict_disc,
+            prog_bar=False,
+            logger=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
-        return self.log_dict
+        return {**log_dict_ae, **log_dict_disc}
 
     def configure_optimizers(self):
         lr = self.learning_rate
