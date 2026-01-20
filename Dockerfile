@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-devel
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
 # Set working directory
 WORKDIR /workspace/SEED-Voken
@@ -17,6 +17,9 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# flash attn
+RUN pip install --no-cache-dir flash-attn
 
 # Copy the rest of the code
 COPY . .

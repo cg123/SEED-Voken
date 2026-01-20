@@ -7,7 +7,7 @@ trainer:
   precision: bf16-mixed
   max_epochs: 30
   check_val_every_n_epoch: 1
-  val_check_interval: 0.05
+  val_check_interval: 4000
   num_sanity_val_steps: 2
   log_every_n_steps: 10
   logger:
@@ -39,6 +39,7 @@ trainer:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
+    - class_path: main.StreamingDatasetTracker
 
 model:
   class_path: src.IBQ.models.ibqgan.IBQ
@@ -86,9 +87,9 @@ data:
   init_args:
     # Larger batch size for 32 GPUs (48 per GPU * 32 = 1536 global batch)
     batch_size: 48
-    num_workers: 8
+    num_workers: 32
     persistent_workers: true
-    prefetch_factor: 2
+    prefetch_factor: 4
     train:
       target: src.IBQ.data.huggingface.HuggingFaceStreamingDatasetTrain
       params:
@@ -97,9 +98,7 @@ data:
           size: 256
           image_column: "image"
           data_files:
-            - "s3://arcee-seed-voken-checkpoints/data/**/*.parquet"
-          shuffle: true
-          shuffle_buffer_size: 10000
+            - "s3://arcee-seed-voken-checkpoints/data/imagenet-plus-cc12m/*.parquet"
     validation:
       target: src.IBQ.data.huggingface.HuggingFaceDatasetValidation
       params:
