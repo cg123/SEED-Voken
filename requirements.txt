@@ -10,7 +10,6 @@ einops~=0.8.1
 requests
 transformers>=4.47.0
 datasets~=4.5.0
-torchdata>=0.7.0
 lpips
 av
 decord
@@ -21,3 +20,4 @@ boto3
 aiobotocore
 s3fs~=2025.10.0
 fsspec[s3]~=2025.10.0
+torchdata>=0.8.0

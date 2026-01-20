@@ -1,42 +1,10 @@
 import argparse, os, sys, datetime, glob, importlib
-from torch.utils.data import random_split, DataLoader, Dataset
+from torch.utils.data import random_split, Dataset
+from torchdata.stateful_dataloader import StatefulDataLoader
 
 import lightning as L
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
-
-# Import StatefulDataLoader for checkpoint/resume with streaming datasets
-from torchdata.stateful_dataloader import StatefulDataLoader
-
-
-class StreamingDatasetTracker(Callback):
-    """
-    Simple callback for logging dataloader state during training.
-    StatefulDataLoader handles all the resume logic automatically.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.first_batch_logged = False
-
-    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        """Log first batch info for verification."""
-        if not self.first_batch_logged:
-            print(f"[Rank {trainer.global_rank}] First batch of epoch {trainer.current_epoch}:")
-            print(f"  - batch_idx={batch_idx}")
-
-            # Log batch hash for verification
-            if isinstance(batch, dict) and "image" in batch:
-                img = batch["image"][0] if len(batch["image"]) > 0 else None
-                if img is not None:
-                    batch_hash = f"{img.sum().item():.6f}"
-                    print(f"  - batch_hash={batch_hash}")
-
-            self.first_batch_logged = True
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        """Reset logging flag for new epoch."""
-        self.first_batch_logged = False
 from lightning import seed_everything
 
 from torch.utils.data.dataloader import default_collate as custom_collate
@@ -93,36 +61,9 @@ class DataModuleFromConfig(L.LightningDataModule):
             self.dataset_configs["test"] = test
             self.test_dataloader = self._test_dataloader
         self.wrap = wrap
-
-        # Store dataloader state for StatefulDataLoader
-        self._train_dataloader_state = None
-        self._current_train_dataloader = None
-        self._train_dataloader_state_schema = "per_rank_v1"
-
-    @staticmethod
-    def _dist_is_initialized():
-        import torch.distributed as dist
-        return dist.is_available() and dist.is_initialized()
-
-    def _select_train_dataloader_state(self, state):
-        if isinstance(state, dict) and state.get("_schema") == self._train_dataloader_state_schema:
-            per_rank = state.get("by_rank", [])
-            if self._dist_is_initialized():
-                import torch.distributed as dist
-                if "world_size" in state and state["world_size"] != dist.get_world_size():
-                    print(
-                        "[DataModule] Warning: DDP world_size changed since checkpoint; "
-                        "dataloader resume may be inaccurate."
-                    )
-                rank = dist.get_rank()
-                if rank < len(per_rank):
-                    return per_rank[rank]
-                print(f"[DataModule] Warning: No dataloader state for rank {rank}")
-                return None
-            if len(per_rank) > 0:
-                return per_rank[0]
-            return None
-        return state
+        # Track active dataloaders for state management
+        self._train_dl = None
+        self._pending_dataloader_state = None
 
     def prepare_data(self):
         for data_cfg in self.dataset_configs.values():
@@ -143,136 +84,66 @@ class DataModuleFromConfig(L.LightningDataModule):
         # Track which datasets are iterable
         self.is_iterable = {k: isinstance(ds, IterableDataset) for k, ds in self.datasets.items()}
 
-    def state_dict(self):
-        """Save datamodule state for checkpointing."""
-        import random
-        import numpy as np
-        import torch
-
-        state = {}
-
-        # Save StatefulDataLoader state if available
-        if self._current_train_dataloader is not None:
-            try:
-                dataloader_state = self._current_train_dataloader.state_dict()
-                if self._dist_is_initialized():
-                    import torch.distributed as dist
-                    world_size = dist.get_world_size()
-                    if world_size > 1:
-                        gathered = [None for _ in range(world_size)]
-                        dist.all_gather_object(gathered, dataloader_state)
-                        dataloader_state = {
-                            "_schema": self._train_dataloader_state_schema,
-                            "by_rank": gathered,
-                            "world_size": world_size,
-                        }
-                state['train_dataloader_state'] = dataloader_state
-                print("[DataModule] Saved StatefulDataLoader state")
-            except Exception as e:
-                print(f"[DataModule] Warning: Could not save dataloader state: {e}")
-
-        # Save RNG states for reproducibility
-        state.update({
-            "python_rng_state": random.getstate(),
-            "numpy_rng_state": np.random.get_state(),
-            "torch_rng_state": torch.get_rng_state(),
-        })
-
-        if torch.cuda.is_available():
-            state["cuda_rng_state"] = torch.cuda.get_rng_state_all()
-
-        return state
-
-    def load_state_dict(self, state_dict):
-        """Load datamodule state from checkpoint."""
-        import random
-        import numpy as np
-        import torch
-
-        # Store dataloader state to restore after dataloader creation
-        raw_dataloader_state = state_dict.get('train_dataloader_state')
-        self._train_dataloader_state = self._select_train_dataloader_state(raw_dataloader_state)
-        if self._train_dataloader_state is not None:
-            print("[DataModule] Loaded StatefulDataLoader state (will restore in train_dataloader)")
-
-        # Restore RNG states immediately
-        if state_dict.get("python_rng_state") is not None:
-            random.setstate(state_dict["python_rng_state"])
-            print("[DataModule] Restored Python RNG state")
-
-        if state_dict.get("numpy_rng_state") is not None:
-            np.random.set_state(state_dict["numpy_rng_state"])
-            print("[DataModule] Restored NumPy RNG state")
-
-        if state_dict.get("torch_rng_state") is not None:
-            torch.set_rng_state(state_dict["torch_rng_state"])
-            print("[DataModule] Restored PyTorch RNG state")
-
-        if state_dict.get("cuda_rng_state") is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(state_dict["cuda_rng_state"])
-            print("[DataModule] Restored CUDA RNG state")
-
     def _train_dataloader(self):
         """
-        Create train dataloader using StatefulDataLoader for streaming datasets.
-        This enables automatic checkpoint/resume for iterable datasets.
+        laion serves as the train loader
         """
         # IterableDatasets (webdataset, streaming HF datasets) don't support shuffle
         is_iterable = self.is_iterable.get("train", False)
 
         if is_iterable:
-            # Use StatefulDataLoader for streaming/iterable datasets
-            dataloader = StatefulDataLoader(
-                self.datasets["train"],
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-                pin_memory=True,
+            self._train_dl = StatefulDataLoader(
+                self.datasets["train"], batch_size=self.batch_size,
+                num_workers=self.num_workers, pin_memory=True,
                 persistent_workers=self.persistent_workers,
-                prefetch_factor=self.prefetch_factor
-            )
-
-            # Restore state if we loaded from checkpoint
-            if self._train_dataloader_state is not None:
-                print("[DataModule] Restoring StatefulDataLoader state")
-                try:
-                    dataloader.load_state_dict(self._train_dataloader_state)
-                    print("[DataModule] StatefulDataLoader state restored successfully")
-                except Exception as e:
-                    print(f"[DataModule] Warning: Could not restore dataloader state: {e}")
-                self._train_dataloader_state = None  # Clear after use
-
-            # Store reference for state_dict() to access
-            self._current_train_dataloader = dataloader
-
-            return dataloader
+                prefetch_factor=self.prefetch_factor)
         else:
-            # Regular datasets use normal DataLoader
-            return DataLoader(
-                self.datasets["train"],
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-                shuffle=True,
-                collate_fn=custom_collate,
-                pin_memory=True,
-                drop_last=True,
+            self._train_dl = StatefulDataLoader(
+                self.datasets["train"], batch_size=self.batch_size,
+                num_workers=self.num_workers, shuffle=True, collate_fn=custom_collate,
+                pin_memory=True, drop_last=True,
                 persistent_workers=self.persistent_workers,
-                prefetch_factor=self.prefetch_factor
-            )
+                prefetch_factor=self.prefetch_factor)
+
+        # Restore state if resuming mid-epoch
+        if self._pending_dataloader_state is not None:
+            self._train_dl.load_state_dict(self._pending_dataloader_state)
+            self._pending_dataloader_state = None
+
+        return self._train_dl
 
     def _val_dataloader(self):
-        return DataLoader(self.datasets["validation"],
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
-                          pin_memory=True,
-                          persistent_workers=self.persistent_workers,
-                          prefetch_factor=self.prefetch_factor)
+        return StatefulDataLoader(
+            self.datasets["validation"],
+            batch_size=self.batch_size,
+            num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
+            pin_memory=True,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor)
 
     def _test_dataloader(self):
-        return DataLoader(self.datasets["test"], batch_size=self.batch_size,
-                          num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
-                          pin_memory=True,
-                          persistent_workers=self.persistent_workers,
-                          prefetch_factor=self.prefetch_factor)
+        return StatefulDataLoader(
+            self.datasets["test"], batch_size=self.batch_size,
+            num_workers=self.num_workers, collate_fn=custom_collate, shuffle=False,
+            pin_memory=True,
+            persistent_workers=self.persistent_workers,
+            prefetch_factor=self.prefetch_factor)
+
+    def state_dict(self) -> dict:
+        """Save dataloader state for mid-epoch checkpoint resumption."""
+        state = {}
+        if self._train_dl is not None:
+            try:
+                state["train_dataloader"] = self._train_dl.state_dict()
+            except Exception as e:
+                print(f"Warning: Could not save train dataloader state: {e}")
+        return state
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore dataloader state for mid-epoch resumption."""
+        if "train_dataloader" in state_dict:
+            self._pending_dataloader_state = state_dict["train_dataloader"]
+
 
 def main():
     cli = LightningCLI(

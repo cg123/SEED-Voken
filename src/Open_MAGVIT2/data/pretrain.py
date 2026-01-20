@@ -61,14 +61,30 @@ class Iter_ds(torch.utils.data.IterableDataset):
         self.tar_paths = tar_paths
         self.rng = random.Random() ##use to shuffle the shards
         self.epoch = epoch
+        # State tracking for mid-epoch checkpoint resumption
+        self._samples_yielded = 0
+        self._pending_skip = 0
 
     def __len__(self):
         # let's say i have 100 image totally, 2 gpus, batch_size = 4.
         # then n_step per epoch should be : `100 // (2 * 4) = 17`, and last batch doesn't fill with 4 samples.
-        # in here, we directly control how many n_step by __len__. 
-        # for the above example, in here should be `100 // 2`, then torch dataloader will try to divided this number by batch_size automatically ~ (since we setup batch_size in torch dataloader)  
+        # in here, we directly control how many n_step by __len__.
+        # for the above example, in here should be `100 // 2`, then torch dataloader will try to divided this number by batch_size automatically ~ (since we setup batch_size in torch dataloader)
         # return self.n_sample // get_world_size()
         return self.n_sample // get_world_size()
+
+    def state_dict(self) -> dict:
+        """Save state for mid-epoch checkpoint resumption."""
+        return {
+            "samples_yielded": self._samples_yielded,
+            "epoch": self.epoch.get_value() if isinstance(self.epoch, SharedEpoch) else self.epoch,
+        }
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """Restore state for mid-epoch resumption."""
+        self._pending_skip = state_dict.get("samples_yielded", 0)
+        if isinstance(self.epoch, SharedEpoch):
+            self.epoch.set_value(state_dict.get("epoch", 0))
     
     def create_webdataset(
         self,
@@ -122,9 +138,21 @@ class Iter_ds(torch.utils.data.IterableDataset):
         # self.rng.seed(seed) ## for determinastic
         shuffle_urls = detshuffle(self.epoch, deepcopy(self.tar_paths)) # shuffle across shards
         dataset = self.create_webdataset(shuffle_urls, self.filter_data)
+        self._samples_yielded = 0
+        # Capture and reset pending skip so only this epoch is affected
+        skip_count = self._pending_skip
+        self._pending_skip = 0
+        # Don't skip if checkpoint was at epoch boundary (completed epoch)
+        if skip_count >= len(self):
+            skip_count = 0
         for batch_id, sample in enumerate(dataset):
             # assign a independent batch for the gpu wrt. gpu_id (nodesplitter in here)
-            if batch_id % world_size == process_rank: 
+            if batch_id % world_size == process_rank:
+                # Skip samples when resuming mid-epoch
+                if self._samples_yielded < skip_count:
+                    self._samples_yielded += 1
+                    continue
+                self._samples_yielded += 1
                 yield sample
             # skip the batch it doesn't belong to the gpu
             else:
