@@ -194,7 +194,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                            "{}/d_weight".format(split): torch.tensor(0.0, device=device),
                            "{}/disc_factor".format(split): torch.tensor(0.0, device=device),
                            "{}/g_loss".format(split): torch.tensor(0.0, device=device),
-                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0, device=device),
+                           "{}/unscaled_g_loss".format(split): torch.tensor(0.0, device=device),
                            }
                 else:
                     if self.training:
@@ -206,7 +206,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/d_weight".format(split): d_weight.detach(),
                                "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): g_loss.detach(),
-                               "{}/unsacled_g_loss".format(split): real_g_loss.detach(),
+                               "{}/unscaled_g_loss".format(split): real_g_loss.detach(),
                                }
                     else:
                         log = {"{}/total_loss".format(split): loss.clone().detach(),
@@ -232,7 +232,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                            "{}/d_weight".format(split): torch.tensor(0.0, device=device),
                            "{}/disc_factor".format(split): torch.tensor(0.0, device=device),
                            "{}/g_loss".format(split): torch.tensor(0.0, device=device),
-                           "{}/unsacled_g_loss".format(split): torch.tensor(0.0, device=device),
+                           "{}/unscaled_g_loss".format(split): torch.tensor(0.0, device=device),
                            }
                 else:
                     if self.training:
@@ -248,7 +248,7 @@ class VQLPIPSWithDiscriminator(nn.Module):
                                "{}/d_weight".format(split): d_weight.detach(),
                                "{}/disc_factor".format(split): torch.tensor(disc_factor, device=device),
                                "{}/g_loss".format(split): g_loss.detach(),
-                               "{}/unsacled_g_loss".format(split): real_g_loss.detach(),
+                               "{}/unscaled_g_loss".format(split): real_g_loss.detach(),
                                }
                     else:
                         log = {"{}/total_loss".format(split): loss.clone().detach(),
