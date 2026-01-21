@@ -21,13 +21,28 @@ spec:
         spec:
           # Use the same service account that has S3 access
           serviceAccountName: torchtitan-service-account
+          initContainers:
+            - name: fix-scratch-perms
+              image: alpine:latest
+              securityContext:
+                runAsUser: 0
+              command: ["/bin/sh", "-c", "chmod 777 /scratch"]
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
           volumes:
             - name: shm
               emptyDir:
                 medium: Memory
-            - name: local
-              hostPath:
-                path: /mnt/k8s-disks/0
+            - name: scratch
+              ephemeral:
+                volumeClaimTemplate:
+                  spec:
+                    accessModes: ["ReadWriteOnce"]
+                    storageClassName: "local-storage"
+                    resources:
+                      requests:
+                        storage: 20Ti
           containers:
             - name: pytorch
               # UPDATE THIS with your ECR image after building
@@ -37,6 +52,7 @@ spec:
                 limits:
                   nvidia.com/gpu: 8
                   vpc.amazonaws.com/efa: 32
+                  memory: 1500Gi # nodes actually have 1.6T, but leave a little walkin' around RAM
               env:
                 # NCCL settings for EFA
                 - name: NCCL_IB_DISABLE
@@ -52,16 +68,23 @@ spec:
                 # Enable Gloo for CPU operations (metrics syncing)
                 - name: PL_TORCH_DISTRIBUTED_BACKEND
                   value: "nccl"
+                # Put stuff on local storage
+                - name: TMPDIR
+                  value: /scratch/tmp
+                - name: HF_HOME
+                  value: /scratch/hf_home
+                - name: TORCH_HOME
+                  value: /scratch/torch_home
                 # API keys from secrets
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
-                      name: api-keys
+                      name: charles-api-keys
                       key: hf
                 - name: WANDB_API_KEY
                   valueFrom:
                     secretKeyRef:
-                      name: api-keys
+                      name: charles-api-keys
                       key: wandb
                 # AWS region for S3 access
                 - name: AWS_DEFAULT_REGION
@@ -73,8 +96,9 @@ spec:
                   set -e
                   echo "Starting SEED-Voken training on $(hostname)"
                   echo "CUDA devices: $(nvidia-smi -L)"
+                  echo "Storage check:"
+                  df -h /scratch
 
-                  # Use torchrun for proper distributed initialization with etcd
                   torchrun \
                     --nproc_per_node=8 \
                     --nnodes=4 \
@@ -90,5 +114,5 @@ spec:
               volumeMounts:
                 - name: shm
                   mountPath: /dev/shm
-                - name: local
-                  mountPath: /local
+                - name: scratch
+                  mountPath: /scratch
