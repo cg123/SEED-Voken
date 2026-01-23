@@ -86,7 +86,7 @@ data:
   init_args:
     # Larger batch size for 32 GPUs (48 per GPU * 32 = 1536 global batch)
     batch_size: 48
-    num_workers: 32
+    num_workers: 8
     persistent_workers: true
     prefetch_factor: 4
     train:
