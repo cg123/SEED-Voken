@@ -42,6 +42,23 @@ class WrappedDataset(Dataset):
         return self.data[idx]
 
 
+class DatasetEpochCallback(Callback):
+    """Callback to call set_epoch() on datasets at the start of each training epoch.
+
+    This is needed for streaming/iterable datasets (e.g. HuggingFace streaming datasets)
+    to ensure proper shuffling across epochs and correct state tracking.
+    """
+
+    def on_train_epoch_start(self, trainer: "L.Trainer", pl_module: "L.LightningModule") -> None:
+        datamodule = trainer.datamodule
+        if datamodule is None or not hasattr(datamodule, "datasets"):
+            return
+
+        train_dataset = datamodule.datasets.get("train")
+        if train_dataset is not None and hasattr(train_dataset, "set_epoch"):
+            train_dataset.set_epoch(trainer.current_epoch)
+
+
 class DataModuleFromConfig(L.LightningDataModule):
     def __init__(self, batch_size, train=None, validation=None, test=None,
                  wrap=False, num_workers=None, persistent_workers=True, prefetch_factor=2):
@@ -112,6 +129,7 @@ class DataModuleFromConfig(L.LightningDataModule):
 
         return self._train_dl
 
+
     def _val_dataloader(self):
         return StatefulDataLoader(
             self.datasets["validation"],
@@ -148,6 +166,9 @@ class DataModuleFromConfig(L.LightningDataModule):
 def main():
     cli = LightningCLI(
         save_config_kwargs={"overwrite": True},
+        trainer_defaults={
+            "callbacks": [DatasetEpochCallback()],
+        },
     )
 
 

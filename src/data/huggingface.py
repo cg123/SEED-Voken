@@ -175,7 +175,9 @@ class HuggingFaceImageDataset(Dataset):
                 # Skip if image couldn't be loaded
                 if pil_image is None:
                     if attempt == max_retries - 1:
-                        raise ValueError(f"Failed to load valid image after {max_retries} attempts")
+                        raise ValueError(
+                            f"Failed to load valid image after {max_retries} attempts"
+                        )
                     continue
 
                 if pil_image.mode != "RGB":
@@ -213,6 +215,10 @@ class HuggingFaceStreamingDataset(IterableDataset):
 
     Args:
         config: Configuration dictionary (same as HuggingFaceImageDataset)
+            - enable_distributed_sharding (bool): shard streaming dataset by DDP rank (default: True)
+            - shuffle (bool, optional): enable streaming shuffle (default: False)
+            - shuffle_buffer_size (int): size of buffer to use for shuffling
+            - shuffle_seed (int, optional): seed for streaming shuffle
         transform_backend: Which transform library to use ("albumentations" or "torchvision")
     """
 
@@ -244,6 +250,12 @@ class HuggingFaceStreamingDataset(IterableDataset):
         self.token = self.config.get("token")
         self.cache_dir = self.config.get("cache_dir")
         self.trust_remote_code = self.config.get("trust_remote_code", False)
+        self.enable_distributed_sharding = self.config.get(
+            "enable_distributed_sharding", True
+        )
+        self.shuffle_buffer_size = self.config.get("shuffle_buffer_size", 10000)
+        self.shuffle_seed = self.config.get("shuffle_seed")
+        self.shuffle = self.config.get("shuffle", False)
 
         # Load dataset in streaming mode
         load_kwargs = {
@@ -262,9 +274,20 @@ class HuggingFaceStreamingDataset(IterableDataset):
             load_kwargs["cache_dir"] = self.cache_dir
 
         self.dataset = load_dataset(**load_kwargs)
+        if self.shuffle:
+            self.dataset = self.dataset.shuffle(
+                buffer_size=self.shuffle_buffer_size,
+                seed=self.shuffle_seed,
+            )
+        if self.enable_distributed_sharding:
+            self.dataset = self._split_dataset_by_node(self.dataset)
 
         # Get column names from features
-        columns = list(self.dataset.features.keys()) if hasattr(self.dataset, 'features') else []
+        columns = (
+            list(self.dataset.features.keys())
+            if hasattr(self.dataset, "features")
+            else []
+        )
 
         # Auto-detect columns if not specified
         if not self.image_column:
@@ -284,6 +307,52 @@ class HuggingFaceStreamingDataset(IterableDataset):
             backend=transform_backend,
         )
 
+    def _split_dataset_by_node(self, dataset):
+        try:
+            import torch.distributed as dist
+        except Exception:
+            return dataset
+        if not dist.is_available() or not dist.is_initialized():
+            return dataset
+
+        from datasets.distributed import split_dataset_by_node
+
+        return split_dataset_by_node(
+            dataset,
+            rank=dist.get_rank(),
+            world_size=dist.get_world_size(),
+        )
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the epoch for shuffling. Called by DataModuleFromConfig at each epoch."""
+        self._epoch = epoch
+        if hasattr(self.dataset, "set_epoch"):
+            self.dataset.set_epoch(epoch)
+
+    def state_dict(self) -> dict:
+        """
+        Return state dict for mid-epoch checkpointing.
+
+        StatefulDataLoader will call this method to save the dataset's state.
+        HuggingFace IterableDataset supports state_dict natively since v2.20.0.
+        """
+        state = {"epoch": getattr(self, "_epoch", 0)}
+        if hasattr(self.dataset, "state_dict"):
+            state["hf_dataset"] = self.dataset.state_dict()
+        return state
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        """
+        Load state dict for mid-epoch resumption.
+
+        StatefulDataLoader will call this method to restore the dataset's state.
+        """
+        if "epoch" in state_dict:
+            self._epoch = state_dict["epoch"]
+            self.set_epoch(self._epoch)
+        if "hf_dataset" in state_dict and hasattr(self.dataset, "load_state_dict"):
+            self.dataset.load_state_dict(state_dict["hf_dataset"])
+
     def __iter__(self):
         skipped_corrupt = 0
         processed = 0
@@ -298,7 +367,9 @@ class HuggingFaceStreamingDataset(IterableDataset):
                 if pil_image is None:
                     skipped_corrupt += 1
                     if skipped_corrupt % 100 == 0:
-                        print(f"Warning: Skipped {skipped_corrupt} corrupt images so far")
+                        print(
+                            f"Warning: Skipped {skipped_corrupt} corrupt images so far"
+                        )
                     continue
 
                 if pil_image.mode != "RGB":
@@ -321,5 +392,7 @@ class HuggingFaceStreamingDataset(IterableDataset):
                 # Skip any sample that causes errors during processing
                 skipped_corrupt += 1
                 if skipped_corrupt % 100 == 0:
-                    print(f"Warning: Skipped {skipped_corrupt} samples due to errors (last error: {type(e).__name__})")
+                    print(
+                        f"Warning: Skipped {skipped_corrupt} samples due to errors (last error: {type(e).__name__})"
+                    )
                 continue
