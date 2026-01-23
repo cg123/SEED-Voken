@@ -254,7 +254,7 @@ class HuggingFaceStreamingDataset(IterableDataset):
             "enable_distributed_sharding", True
         )
         self.shuffle_buffer_size = self.config.get("shuffle_buffer_size", 10000)
-        self.shuffle_seed = self.config.get("shuffle_seed")
+        self.shuffle_seed = self.config.get("shuffle_seed", 42)
         self.shuffle = self.config.get("shuffle", False)
 
         # Load dataset in streaming mode
