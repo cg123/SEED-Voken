@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -86,6 +88,10 @@ class VQModel(L.LightningModule):
         self.lr_drop_rate = lr_drop_rate
 
         self.strict_loading = False
+
+        # CUDA events for lagged GPU timing (read previous step's timing without blocking)
+        self._cuda_start_event = None
+        self._cuda_end_event = None
 
     @contextmanager
     def ema_scope(self, context=None):
@@ -257,6 +263,20 @@ class VQModel(L.LightningModule):
     # fix mulitple optimizer bug
     # refer to https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
     def training_step(self, batch, batch_idx):
+        step_start_time = time.perf_counter()
+
+        # Log GPU time from previous step (lagged timing - avoids sync stalls)
+        if torch.cuda.is_available() and self._cuda_end_event is not None:
+            if self._cuda_end_event.query():  # Check if previous step's GPU work is done (non-blocking)
+                gpu_time_ms = self._cuda_start_event.elapsed_time(self._cuda_end_event)
+                self.log("train/gpu_step_time_ms", gpu_time_ms, prog_bar=False, logger=True,
+                         on_step=True, on_epoch=False, sync_dist=False, rank_zero_only=True)
+
+        # Record CUDA start event for this step
+        if torch.cuda.is_available():
+            self._cuda_start_event = torch.cuda.Event(enable_timing=True)
+            self._cuda_start_event.record()
+
         x = self.get_input(batch, self.image_key)
         xrec, qloss = self(x)
 
@@ -314,6 +334,23 @@ class VQModel(L.LightningModule):
         if self.scheduler_type != "None":
             scheduler_disc.step()
             scheduler_gen.step()
+
+        # Record CUDA end event for this step (will be read next step)
+        if torch.cuda.is_available():
+            self._cuda_end_event = torch.cuda.Event(enable_timing=True)
+            self._cuda_end_event.record()
+
+        # Log throughput metrics (no sync_dist - each rank logs its local throughput)
+        step_time = time.perf_counter() - step_start_time
+        local_batch_size = x.shape[0]
+        world_size = getattr(self.trainer, "world_size", 1)
+        global_batch_size = local_batch_size * world_size
+        # Throughput: global samples/sec (each rank processes local_batch_size, so total is global)
+        throughput = global_batch_size / step_time
+        self.log("train/throughput_samples_per_sec", throughput, prog_bar=True, logger=True,
+                 on_step=True, on_epoch=False, sync_dist=False, rank_zero_only=True)
+        self.log("train/step_time_ms", step_time * 1000, prog_bar=False, logger=True,
+                 on_step=True, on_epoch=False, sync_dist=False, rank_zero_only=True)
 
     def validation_step(self, batch, batch_idx):
         if self.use_ema:
