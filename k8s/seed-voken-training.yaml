@@ -1,7 +1,7 @@
 apiVersion: "kubeflow.org/v1"
 kind: PyTorchJob
 metadata:
-  name: seed-voken-ibq-16k
+  name: seed-voken-ibq-32k
 spec:
   elasticPolicy:
     rdzvBackend: etcd
@@ -102,11 +102,11 @@ spec:
                   torchrun \
                     --nproc_per_node=8 \
                     --nnodes=4 \
-                    --rdzv_id=seed-voken-ibq-16k \
+                    --rdzv_id=seed-voken-ibq-32k \
                     --rdzv_backend=etcd \
                     --rdzv_endpoint=etcd:2379 \
                     main.py fit \
-                    --config=configs/k8s/imagenet_16k_distributed.yaml \
+                    --config=configs/k8s/imagenet_32k_distributed.yaml \
                     || {
                     echo "Training ended with error, sleeping for debugging..."
                     sleep 600
