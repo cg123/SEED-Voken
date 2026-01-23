@@ -36,7 +36,7 @@ trainer:
         save_last: true
         monitor: "train/perceptual_loss"
         every_n_train_steps: 1000
-    - class_path:16 lightning.pytorch.callbacks.LearningRateMonitor
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step
 
